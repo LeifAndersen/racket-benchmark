@@ -42,7 +42,7 @@
 
 (define benchmark-show-legend? (make-parameter #t))
 
-(struct bootstrapped-ci (name opts mean conf-lb conf-ub))
+(struct bootstrapped-ci (name opts norm-points mean conf-lb conf-ub))
 
 ;; render-benchmark-alts : (listof any/c) (listof benchmark-result?)
 ;;                         -> renderer2d?
@@ -115,6 +115,9 @@
     (bootstrapped-ci
      name
      opts
+     (if normalize
+         (benchmark-result-trial-times norm-br)
+         (benchmark-result-trial-times br))
      ;; TODO: is this the proper way to calculate mean?
      mean-br
      ;; TODO not confidence intervals anymore, see above
@@ -167,32 +170,55 @@
 ;;                        plot-brush-style/c rational? (>=/c 0) (>/c 0)
 ;;                        -> (listof renderer2d?)
 (define (render-benchmark-alt alt-name bcis color style start-x skip bar-width)
+  (define (random-offset point width)
+    (+ point (- (* width (random)) (/ width 2))))
   (define (data-point bci)
     (vector (bootstrapped-ci-name bci) (bootstrapped-ci-mean bci)))
+  (define (data-point2 bci)
+    (vector (bootstrapped-ci-name bci) 0))
+  (define (data-samples bci i)
+    (let* ([pts (bootstrapped-ci-norm-points bci)]
+           [delta-to-mid-bar (/ (+ bar-width (discrete-histogram-gap)) 2)])
+      (points
+       #:sym 'dot
+       #:color (rectangle-line-color)
+       (for/list ([p (in-list pts)])
+         (list (random-offset (+ start-x (* skip i) delta-to-mid-bar)
+                              (/ skip 4))
+               p)))))
   (define (data-error-bars bci i)
     (let* ([conf-lb (bootstrapped-ci-conf-lb bci)]
            [conf-ub (bootstrapped-ci-conf-ub bci)]
            [conf-mean (bootstrapped-ci-mean bci)]
            [conf-ht (- conf-ub conf-mean)]
            [delta-to-mid-bar (/ (+ bar-width (discrete-histogram-gap)) 2)])
-      (error-bars (list (vector
-                         (+ start-x (* skip i) delta-to-mid-bar)
-                         conf-mean
-                         conf-ht)))))
-  (cons
-   (if (benchmark-show-legend?)
-       (discrete-histogram (map data-point bcis)
-                       #:skip skip
-                       #:label alt-name
-                       #:color color
-                       #:style style
-                       #:x-min start-x)
-       (discrete-histogram (map data-point bcis)
-                       #:skip skip
-                       ;; no labels, that disables the legend
-                       #:color color
-                       #:style style
-                       #:x-min start-x))
+      (error-bars
+       #:width 50
+       (list (vector
+              (+ start-x (* skip i) delta-to-mid-bar)
+              conf-mean
+              conf-ht)))))
+  
+  (append
+   (list #;(if (benchmark-show-legend?)
+              (discrete-histogram (map data-point bcis)
+                                  #:skip skip
+                                  #:label alt-name
+                                  #:color color
+                                  #:style style
+                                  #:x-min start-x)
+              (discrete-histogram (map data-point bcis)
+                                  #:skip skip
+                                  ;; no labels, that disables the legend
+                                  #:color color
+                                  #:style style
+                                  #:x-min start-x)))
+   (list (discrete-histogram (map data-point2 bcis)
+                             #:skip skip
+                             #:color color
+                             #:style style
+                             #:x-min start-x))
+   (map data-samples bcis (for/list ([i (in-range 0 (length bcis))]) i))
    (map data-error-bars bcis (for/list ([i (in-range 0 (length bcis))]) i))))
 
 (define (mean-quotient ys xs)
